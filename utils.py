@@ -2,87 +2,114 @@
 # coding: utf-8
 
 import numpy as np
+from tensorflow import keras
 import tensorflow as tf
-from tensorflow import image
-from tensorflow.keras.preprocessing.image import load_img, img_to_array
-import PIL
+from keras.layers import Conv2D, Conv2DTranspose, LeakyReLU, Add, Input
+from keras.models import Model
+from tensorflow.nn import depth_to_space
 from matplotlib import pyplot as plt
+from keras.callbacks import ModelCheckpoint
+from keras.preprocessing.image import array_to_img
+from tensorflow.keras.preprocessing import image_dataset_from_directory
+from PIL import Image
+import math
+from scipy.signal import convolve2d
 
-def downsample(tensor, factor, size):
-    return image.resize(tensor, [size//factor, size//factor], method='bicubic') 
-
-def normalize(image, maximum):
-    factor = maximum / (np.amax(image) - np.amin(image))
-    result = (image - np.amin(image)) * factor 
+def normalize(image, min, max):
+    factor = (max - min) / (np.amax(image) - np.amin(image))
+    result = (image - np.amin(image)) * factor + min
     return result
 
-def processInput(tensor):
-    tensor = tensor / 255.0
-    last_dimension_axis = len(tensor.shape) - 1
-    y, u, v = tf.split(tensor, 3, axis=last_dimension_axis)
-    return y
+def downsample(image, factor):
+    kernel = np.ones((factor, factor))
+    convolved = convolve2d(image, kernel, mode='valid')
+    return convolved[::factor, ::factor] / factor 
 
+def mse(y_pred, y_true):
+    return np.square(np.subtract(y_true,y_pred)).mean() 
 
-def predict(model, img):
-    img = img[:,:,0]
-    y = img_to_array(img)
-    y = y.astype("float32") / 255.0
+def rmse(y_pred, y_true):
+    return math.sqrt(mse(y_pred, y_true))
 
-    input = np.expand_dims(y, axis=0)
-    out = model.predict(input)
+def psnr(y_pred, y_true):
+    rMSE = rmse(y_pred, y_true)
+    if(rMSE == 0):  
+        return 100
+    return 20 * math.log10(y_true.max() / rMSE)
     
-    outRes = np.zeros([out[0].shape[0], out[0].shape[1], 3])
-    for i in range(out[0].shape[0]):
-        for j in range(out[0].shape[1]):
-            for k in range(3):
-                outRes [i,j,k] = out[0][i,j]
-    return outRes
+def bicubic_interpolation(array, img_size):
+    img = Image.fromarray(array)
+    img = img.resize([img_size, img_size])
+    return np.asarray(img)
 
+def test_srcnn(model, lr_data, data):
+    bicubic_predictions = np.array( [bicubic_interpolation(img, data[0].shape[0]) for img in lr_data] )
+    srcnn_predictions = np.array( [model.predict(np.expand_dims(img, axis=0)) for img in lr_data] )
+    # denormalize data
+    bicubic_predictions = np.array( [ normalize(bicubic_predictions[i], data[i].min() , data[i].max()) for i in range(bicubic_predictions.shape[0]) ] )
+    srcnn_predictions = np.array( [ normalize(srcnn_predictions[i].reshape((data[0].shape[0], data[0].shape[1])), data[i].min() , data[i].max()) for i in range(srcnn_predictions.shape[0]) ] )
 
-def psnr(y_true, y_pred):
-        return tf.image.psnr(y_true, y_pred, 1, name=None)
-
+    # metrics 
+    bicubic_psnr = np.array([ psnr(bicubic_predictions[i], data[i]) for i in range(bicubic_predictions.shape[0]) ])
+    bicubic_rmse = np.array([ rmse(bicubic_predictions[i], data[i]) for i in range(bicubic_predictions.shape[0]) ])
+    srcnn_psnr = np.array([ psnr(srcnn_predictions[i], data[i]) for i in range(srcnn_predictions.shape[0]) ])
+    srcnn_rmse = np.array([ rmse(srcnn_predictions[i], data[i]) for i in range(srcnn_predictions.shape[0]) ])
     
-def test_srcnn(model, test_img_paths):
-    upscale_factor=2
-    img_size=144
-    total_bicubic_psnr = 0.0
-    total_test_psnr = 0.0
-    for index, test_img_path in enumerate(test_img_paths[100:200]):
-        img = load_img(test_img_path)
-        lowres_input = downsample(img, upscale_factor, img_size)
-        lowres_img_arr = normalize(img_to_array(lowres_input), 1)
-        
-        # bicubic interpolation 
-        highres_img = image.resize(lowres_input, [img_size, img_size], method='bicubic')
+    # plot results
+    print('Average bicubic PSNR : ', bicubic_psnr.mean())
+    print('Average bicubic RMSE : ', bicubic_rmse.mean())
+    print('Average SRCNN PSNR : ', srcnn_psnr.mean())
+    print('Average SRCNN RMSE : ',srcnn_rmse.mean())
+    
+    for i in range(0,100,20):
+        plt.figure()
+        f, (ax2, ax3, ax4) = plt.subplots(1, 3, sharey=True, figsize=(10,5))
+        ax2.imshow(bicubic_predictions[i])
+        ax2.set_title('bicubic')
+        ax3.imshow(srcnn_predictions[i])
+        ax3.set_title('SRCNN')
+        ax4.imshow(data[i])
+        ax4.set_title('Ground Truth')
+        plt.show()
+        print("PSNR of Bicubic and Ground Truth image is ", bicubic_psnr[i])
+        print("PSNR of SRCNN and Ground Truth is ", srcnn_psnr[i])
 
-        # model prediction
-        prediction = predict(model, lowres_input)
 
-        highres_img_arr = normalize(img_to_array(highres_img),1)
-        predict_img_arr = normalize(img_to_array(prediction),1)
-        ground_truth = normalize(img_to_array(img),1)
-        
-        bicubic_psnr = tf.image.psnr(highres_img_arr, ground_truth, max_val=1)
-        test_psnr = tf.image.psnr(predict_img_arr, ground_truth, max_val=1)
-        
-        total_bicubic_psnr += bicubic_psnr
-        total_test_psnr += test_psnr
-        if index%10 == 0:
-            plt.figure()
-            f, (ax2, ax3, ax4) = plt.subplots(1, 3, sharey=True, figsize=(15,10))
-            ax2.imshow(highres_img_arr)
-            ax2.set_title('bicubic')
-            ax3.imshow(predict_img_arr)
-            ax3.set_title('srcnn')
-            ax4.imshow(ground_truth)
-            ax4.set_title('ground truth')
-            plt.show()
-            print(
-            "PSNR of Bicubic and Ground Truth image is %.4f" % bicubic_psnr   
-             )
-            print("PSNR of Prediction and Ground Truth is %.4f" % test_psnr)
-           
+def test_dipci(model, ssh_lr, sst_norm, ssh):
+    bicubic_pred = np.array( [bicubic_interpolation(img, ssh[0].shape[0]) for img in ssh_lr] )
+    
+    # model prediction
+    input_tuple = []
+    for i in range( ssh_lr.shape[0] ):
+        input_tuple.append(( ssh_lr[i] , sst_norm[i] ))
 
-    print("Avg. PSNR for BICUBIC is %.4f" % (total_bicubic_psnr / 100))
-    print("Avg. PSNR for PREDICTION is %.4f" % (total_test_psnr / 100))
+    dipci_pred = np.array( [model.predict( [np.expand_dims(img[0], axis=0),np.expand_dims(img[1], axis=0)] ) for img in input_tuple] )
+
+    # denormalize data
+    bicubic_pred = np.array( [ normalize(bicubic_pred[i], ssh[i].min(), ssh[i].max()) for i in range(bicubic_pred.shape[0]) ] )
+    dipci_pred = np.array( [ normalize(dipci_pred[i].reshape(ssh[0].shape[0], ssh[0].shape[1]), ssh[i].min(), ssh[i].max()) for i in range(dipci_pred.shape[0]) ] )
+    
+    # metrics
+    bicubic_psnr = np.array([ psnr(bicubic_pred[i], ssh[i]) for i in range(bicubic_pred.shape[0]) ])
+    bicubic_rmse = np.array([ rmse(bicubic_pred[i], ssh[i]) for i in range(bicubic_pred.shape[0]) ])
+    dipci_psnr = np.array([ psnr(dipci_pred[i], ssh[i]) for i in range(dipci_pred.shape[0]) ])
+    dipci_rmse = np.array([ rmse(dipci_pred[i], ssh[i]) for i in range(dipci_pred.shape[0]) ])
+               
+    # plot results
+    print('Average bicubic PSNR : ', bicubic_psnr.mean())
+    print('Average bicubic RMSE : ', bicubic_rmse.mean())
+    print('Average DIPCI PSNR : ', dipci_psnr.mean())
+    print('Average DIPCI RMSE : ', dipci_rmse.mean())
+                            
+    for i in range(0,100,20):
+        plt.figure()
+        f, (ax2, ax3, ax4) = plt.subplots(1, 3, sharey=True, figsize=(10,5))
+        ax2.imshow(bicubic_pred[i])
+        ax2.set_title('bicubic')
+        ax3.imshow(dipci_pred[i])
+        ax3.set_title('ours')
+        ax4.imshow(ssh[i])
+        ax4.set_title('Ground Truth')
+        plt.show()
+        print("PSNR of Bicubic and Ground Truth image is ", bicubic_psnr[i])
+        print("PSNR of DIPCI and Ground Truth is ", dipci_psnr[i])
