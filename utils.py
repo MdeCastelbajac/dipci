@@ -14,6 +14,7 @@ from tensorflow.keras.preprocessing import image_dataset_from_directory
 from PIL import Image
 import math
 from scipy.signal import convolve2d
+from keras import backend as K
 
 def normalize(image, min, max):
     factor = (max - min) / (np.amax(image) - np.amin(image))
@@ -36,7 +37,10 @@ def psnr(y_pred, y_true):
     if(rMSE == 0):  
         return 100
     return 20 * math.log10(y_true.max() / rMSE)
-    
+
+def PSNR(y_pred, y_true):
+     return tf.image.psnr(y_pred, y_true, max_val=1.0)
+
 def bicubic_interpolation(array, img_size):
     img = Image.fromarray(array)
     img = img.resize([img_size, img_size])
