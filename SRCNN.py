@@ -11,7 +11,7 @@ from tensorflow.keras.preprocessing.image import load_img
 from tensorflow.keras.preprocessing.image import array_to_img
 from tensorflow.keras.preprocessing.image import img_to_array
 import matplotlib.pyplot as plt
-from utils import PSNR
+from utils import PSNR, bicubic_interpolation
 
 
 def getModel(upscale_factor=4, channels=1):
@@ -21,9 +21,6 @@ def getModel(upscale_factor=4, channels=1):
         "padding": "same",
     }
     inputs = keras.Input(shape=(None, None, channels))
-    x = layers.Conv2D(64, 5, **conv_args)(inputs)
-    x = layers.Conv2D(64, 3, **conv_args)(x)
-    x = layers.Conv2D(32, 3, **conv_args)(x)
     x = layers.Conv2D(64, 5, **conv_args)(inputs)
     x = layers.Conv2D(64, 3, **conv_args)(x)
     x = layers.Conv2D(32, 3, **conv_args)(x)
@@ -62,6 +59,7 @@ def trainModel( srcnn, batch_size, ssh_lr, ssh_norm, callbacks, epochs ):
     train_ds = tf.data.Dataset.from_tensor_slices(
             (ssh_lr[0:366], ssh_norm[0:366])
             )
+
     train_ds = train_ds.batch(batch_size)
     validation_ds = ( 
             ssh_lr[366:],
