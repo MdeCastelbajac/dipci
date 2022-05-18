@@ -7,6 +7,7 @@ from tensorflow.keras.layers import Conv2D, Conv2DTranspose, LeakyReLU, Add, Inp
 from tensorflow.keras.models import Model
 from tensorflow.nn import depth_to_space
 from matplotlib import pyplot as plt
+from utils import PSNR
 
 filters = 32
 upscale_factor = 2
@@ -51,4 +52,56 @@ def net():
     y = upsample(lr_input)
     hr = Add()([y, x])
 
+    # secondPass
+    x = shuffle(x)
+    x = simple_conv(x)
+    y = upsample(hr)
+    hr = Add()([y, x])
+
     return Model(inputs=[lr_input, hr_input], outputs=hr)
+
+def compile():
+    epochs = 200
+    loss = keras.losses.MeanSquaredError()
+    optimizer = keras.optimizers.Adam(learning_rate=0.001)
+    checkpoint_filepath = "./tmp/checkpoint_dipci"
+    model_checkpoint_callback = keras.callbacks.ModelCheckpoint(
+        filepath=checkpoint_filepath,
+        save_weights_only=True,
+        monitor="loss",
+        mode="min",
+        save_best_only=True,
+    )
+    callbacks = [model_checkpoint_callback]
+
+    dipci = net()
+    dipci.compile(optimizer=optimizer, loss=loss, metrics=['mse', PSNR])
+    dipci.summary()
+
+    return dipci, callbacks, epochs, checkpoint_filepath
+
+def train( dipci, ssh_lr, sst_lr, ssh_norm, callbacks, epochs ):
+    history = dipci.fit(
+        x = {
+            "lr_input": ssh_lr[0:366], 
+            "hr_input": sst_lr[0:366]
+            },
+        y=ssh_norm[0:366], 
+        epochs=epochs, 
+        callbacks=callbacks, 
+        validation_data= {
+            "lr_input": ssh_lr[366:0], 
+            "hr_input": sst_lr[366:0] 
+            },
+        verbose=1 
+    )
+
+    plt.plot(history.history['mse'][10:])
+    plt.figure()
+    plt.plot(history.history['PSNR'])
+
+    dipci.save('tmp/model/dipci')
+    
+    return dipci
+
+
