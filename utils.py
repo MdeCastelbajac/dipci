@@ -4,17 +4,11 @@
 import numpy as np
 from tensorflow import keras
 import tensorflow as tf
-from keras.layers import Conv2D, Conv2DTranspose, LeakyReLU, Add, Input
 from keras.models import Model
-from tensorflow.nn import depth_to_space
 from matplotlib import pyplot as plt
-from keras.callbacks import ModelCheckpoint
 from keras.preprocessing.image import array_to_img
-from tensorflow.keras.preprocessing import image_dataset_from_directory
-from PIL import Image
 import math
 from scipy.signal import convolve2d
-from keras import backend as K
 
 def normalize(image, min, max):
     factor = (max - min) / (np.amax(image) - np.amin(image))
@@ -33,89 +27,104 @@ def rmse(y_pred, y_true):
     return math.sqrt(mse(y_pred, y_true))
 
 def psnr(y_pred, y_true):
+    # for numpy arrays
     rMSE = rmse(y_pred, y_true)
     if(rMSE == 0):  
         return 100
     return 20 * math.log10(y_true.max() / rMSE)
 
 def PSNR(y_pred, y_true):
-     return tf.image.psnr(y_pred, y_true, max_val=1.0)
+    # tensor safe 
+    # keras metric 
+    return tf.image.psnr(y_pred, y_true, max_val=1.0)
 
-def bicubic_interpolation(array, img_size):
+def bicubicInterpolation(array, img_size):
     img = Image.fromarray(array)
     img = img.resize([img_size, img_size])
     return np.asarray(img)
 
-def test_srcnn(model, lr_data, data):
-    bicubic_predictions = np.array( [bicubic_interpolation(img, data[0].shape[0]) for img in lr_data] )
+def plot_line(Images,Titres,cmap,save_name,label="SSH(m)",shrink=0.3,center_colormap=True):
+    # Images : a list of images
+    # Titres : The titles of the n images in the same order
+    # cmap : the colormap to use (advice : "terrain" for SSH, "seismic" for difference)
+    # label : the label of the colorbar
+    # shrink :a float that shrinks the cbar
+    # center_colorbar : a boolean to center the colobar (for differences for exemple.)
+    fig,axes=plt.subplots(nrows=1,ncols=len(Images),figsize=(35,15))
+    for ax in axes:
+        ax.set_xticks([])
+        ax.set_yticks([])
+    clim=(100,-100)
+    for n in range (len(Images)):
+        im=axes[0].imshow(Images[n],cmap=cmap)
+        clim_new=im.properties()["clim"]
+        clim=(min(clim[0],clim_new[0]),max(clim[1],clim_new[1]))
+    if center_colormap:
+        clim=(-max(abs(clim[0]),abs(clim[1])),max(abs(clim[0]),abs(clim[1])))
+
+    for n in range (len(Images)):
+        im=axes[0].imshow(Images[n],cmap=cmap,clim=clim)
+        
+    for n in range (len(Images)):
+ 
+        axes[n].imshow(Images[n],clim=clim,cmap=cmap)
+        axes[n].set_title(Titres[n],fontsize=20)
+    col=fig.colorbar(im,ax= axes[:], location ="right",shrink=shrink)
+    col.ax.tick_params(labelsize=20)
+    col.set_label(label=label,size=20)
+    plt.savefig(save_name+".pdf",bbox_inches="tight")
+    return
+
+
+def bicubicPredict( lr_data, data ):
+    length = lr.data.shape[0]
+    bicubic_upsampled_images = np.array(
+            [bicubicInterpolation(img, data[0].shape[0]) for img in lr_data]
+            )
+    bicubic_denormalized = np.array(
+            [normalize(bicubic_upsampled_images[i], data[i].min(), data[i].max()) for i in range(length)]
+            )
+    return bicubic_denormalized
+
+
+def bicubicMetrics( lr_data, data ):
+    length = lr.data.shape[0]
+    bicubic_predictions = bicubicPredict(lr_data, data)
+    bicubic_psnr = np.array([ psnr(bicubic_predictions[i], data[i]) for i in range(length) ])
+    bicubic_rmse = np.array([ rmse(bicubic_predictions[i], data[i]) for i in range(length) ])
+    return bicubic_predictions, bicubic_rmse, bicubic_rmse
+
+
+def srcnnPredict(model, lr_data, data):
     srcnn_predictions = np.array( [model.predict(np.expand_dims(img, axis=0)) for img in lr_data] )
-    # denormalize data
-    bicubic_predictions = np.array( [ normalize(bicubic_predictions[i], data[i].min() , data[i].max()) for i in range(bicubic_predictions.shape[0]) ] )
-    srcnn_predictions = np.array( [ normalize(srcnn_predictions[i].reshape((data[0].shape[0], data[0].shape[1])), data[i].min() , data[i].max()) for i in range(srcnn_predictions.shape[0]) ] )
-
-    # metrics 
-    bicubic_psnr = np.array([ psnr(bicubic_predictions[i], data[i]) for i in range(bicubic_predictions.shape[0]) ])
-    bicubic_rmse = np.array([ rmse(bicubic_predictions[i], data[i]) for i in range(bicubic_predictions.shape[0]) ])
-    srcnn_psnr = np.array([ psnr(srcnn_predictions[i], data[i]) for i in range(srcnn_predictions.shape[0]) ])
-    srcnn_rmse = np.array([ rmse(srcnn_predictions[i], data[i]) for i in range(srcnn_predictions.shape[0]) ])
-    
-    # plot results
-    print('Average bicubic PSNR : ', bicubic_psnr.mean())
-    print('Average bicubic RMSE : ', bicubic_rmse.mean())
-    print('Average SRCNN PSNR : ', srcnn_psnr.mean())
-    print('Average SRCNN RMSE : ',srcnn_rmse.mean())
-    
-    for i in range(0,100,20):
-        plt.figure()
-        f, (ax2, ax3, ax4) = plt.subplots(1, 3, sharey=True, figsize=(10,5))
-        ax2.imshow(bicubic_predictions[i])
-        ax2.set_title('bicubic')
-        ax3.imshow(srcnn_predictions[i])
-        ax3.set_title('SRCNN')
-        ax4.imshow(data[i])
-        ax4.set_title('Ground Truth')
-        #col=f.colorbar(ax4 ,location ="right")
-        plt.show()
-        print("PSNR of Bicubic and Ground Truth image is ", bicubic_psnr[i])
-        print("PSNR of SRCNN and Ground Truth is ", srcnn_psnr[i])
+    srcnn_predictions = np.array( [srcnn_predictions[i].reshape((data[0].shape[0], data[0].shape[1]))] )
+    srcnn_predictions = np.array([ normalize(srcnn_predictions[i], data[i].min() , data[i].max()) for i in range(length) ])
+    return srcnn_predictions
 
 
-def test_dipci(model, ssh_lr, sst_norm, ssh):
-    bicubic_pred = np.array( [bicubic_interpolation(img, ssh[0].shape[0]) for img in ssh_lr] )
+def srcnnMetrics( model, lr_data, data ):
+    length = lr_data.shape[0]
+    srcnn_predictions = srcnnPredict( model, lr_data, data )
+    srcnn_psnr = np.array([ psnr(srcnn_predictions[i], data[i]) for i in range(length) ])
+    srcnn_rmse = np.array([ rmse(srcnn_predictions[i], data[i]) for i in range(length) ])
+    return srcnn_predictions, srcnn_rmse, srcnn_psnr
     
-    # model prediction
+
+def dipciPredict( model, ssh_lr, sst, ssh ):
+    length = ssh_lr.shape[0]
     input_tuple = []
     for i in range( ssh_lr.shape[0] ):
-        input_tuple.append(( ssh_lr[i] , sst_norm[i] ))
-
-    dipci_pred = np.array( [model.predict( [np.expand_dims(img[0], axis=0),np.expand_dims(img[1], axis=0)] ) for img in input_tuple] )
-
-    # denormalize data
-    bicubic_pred = np.array( [ normalize(bicubic_pred[i], ssh[i].min(), ssh[i].max()) for i in range(bicubic_pred.shape[0]) ] )
-    dipci_pred = np.array( [ normalize(dipci_pred[i].reshape(ssh[0].shape[0], ssh[0].shape[1]), ssh[i].min(), ssh[i].max()) for i in range(dipci_pred.shape[0]) ] )
+        input_tuple.append(( ssh_lr[i] , sst[i] ))
+    dipci_predictions = np.array( [model.predict( [np.expand_dims(img[0], axis=0),np.expand_dims(img[1], axis=0)] ) for img in input_tuple] )
+    dipci_predictions = np.array( [dipci_predictions[i].reshape(ssh[0].shape[0], ssh[0].shape[1]) for i in range(length)] )
+    dipci_predictions = np.array( [ normalize(dipci_pred[i], ssh[i].min(), ssh[i].max()) for i in range(length) ] )
+    return dipci_predictions
     
-    # metrics
-    bicubic_psnr = np.array([ psnr(bicubic_pred[i], ssh[i]) for i in range(bicubic_pred.shape[0]) ])
-    bicubic_rmse = np.array([ rmse(bicubic_pred[i], ssh[i]) for i in range(bicubic_pred.shape[0]) ])
-    dipci_psnr = np.array([ psnr(dipci_pred[i], ssh[i]) for i in range(dipci_pred.shape[0]) ])
-    dipci_rmse = np.array([ rmse(dipci_pred[i], ssh[i]) for i in range(dipci_pred.shape[0]) ])
-               
-    # plot results
-    print('Average bicubic PSNR : ', bicubic_psnr.mean())
-    print('Average bicubic RMSE : ', bicubic_rmse.mean())
-    print('Average DIPCI PSNR : ', dipci_psnr.mean())
-    print('Average DIPCI RMSE : ', dipci_rmse.mean())
-                            
-    for i in range(0,100,20):
-        plt.figure()
-        f, (ax2, ax3, ax4) = plt.subplots(1, 3, sharey=True, figsize=(10,5))
-        ax2.imshow(bicubic_pred[i])
-        ax2.set_title('bicubic')
-        ax3.imshow(dipci_pred[i])
-        ax3.set_title('ours')
-        ax4.imshow(ssh[i])
-        ax4.set_title('Ground Truth')
-        #col=f.colorbar(ax4 ,location ="right")
-        plt.show()
-        print("PSNR of Bicubic and Ground Truth image is ", bicubic_psnr[i])
-        print("PSNR of DIPCI and Ground Truth is ", dipci_psnr[i])
+
+def dipciMetrics( model, ssh_lr, sst, ssh ):
+    length = ssh_lr.shape[0]
+    dipci_predictions = dipciPredict( model, ssh_lr, sst, ssh )
+    dipci_psnr = np.array([ psnr(dipci_predictions[i], ssh[i]) for i in range(length) ])
+    dipci_rmse = np.array([ rmse(dipci_predictions[i], ssh[i]) for i in range(length) ])
+    return dipci_predictions, dipci_rmse, dipci_psnr
+

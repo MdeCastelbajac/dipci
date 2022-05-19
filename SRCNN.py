@@ -11,7 +11,7 @@ from tensorflow.keras.preprocessing.image import load_img
 from tensorflow.keras.preprocessing.image import array_to_img
 from tensorflow.keras.preprocessing.image import img_to_array
 import matplotlib.pyplot as plt
-from utils import PSNR, bicubic_interpolation
+from utils import PSNR, bicubicInterpolation
 
 
 def getModel(upscale_factor=4, channels=1):
