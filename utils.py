@@ -116,9 +116,9 @@ def dipciPredict( model, ssh_lr, sst, ssh ):
     input_tuple = []
     for i in range( ssh_lr.shape[0] ):
         input_tuple.append(( ssh_lr[i] , sst[i] ))
-    dipci_predictions = np.array( [model.predict( [np.expand_dims(img[0], axis=0),np.expand_dims(img[1], axis=0)] ) for img in input_tuple] )
+    dipci_predictions = np.array( [model.predict( [np.expand_dims(img[0], axis=0),np.expand_dims(img[1], axis=0)], verbose=0 ) for img in input_tuple] )
     dipci_predictions = np.array( [dipci_predictions[i].reshape(ssh[0].shape[0], ssh[0].shape[1]) for i in range(length)] )
-    dipci_predictions = np.array( [ normalize(dipci_pred[i], ssh[i].min(), ssh[i].max()) for i in range(length) ] )
+    dipci_predictions = np.array( [ normalize(dipci_predictions[i], ssh[i].min(), ssh[i].max()) for i in range(length) ] )
     return dipci_predictions
     
 

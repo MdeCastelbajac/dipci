@@ -17,7 +17,7 @@ def simple_conv_model( filters=filters*2 ):
     input_img = Input(shape=(None, None, 1))
     x = Conv2D(filters, (3,3), padding='same')(input_img)
     x = LeakyReLU(alpha=0.2)(x)        
-    for i in range( 21 ):
+    for i in range( 10 ):
         x = Conv2D(filters, (3,3), padding='same')(x)
         x = LeakyReLU(alpha=0.2)(x)
     x = Conv2D(1, (3,3), padding='same')(x)
@@ -64,7 +64,7 @@ def net():
 def compile():
     epochs = 100
     loss = keras.losses.MeanSquaredError()
-    optimizer = keras.optimizers.Adam(learning_rate=0.001)
+    optimizer = keras.optimizers.Adam(learning_rate=0.003)
     checkpoint_filepath = "./tmp/checkpoint_dipci"
     model_checkpoint_callback = keras.callbacks.ModelCheckpoint(
         filepath=checkpoint_filepath,
@@ -88,14 +88,14 @@ def train( dipci, ssh_lr, sst_lr, ssh_norm, callbacks, epochs ):
             "hr_input": sst_lr[0:366]
             },
         y=ssh_norm[0:366], 
-        batch_size=16,
+        batch_size=4,
         epochs=epochs, 
         callbacks=callbacks, 
         validation_data= {
             "lr_input": ssh_lr[366:0], 
             "hr_input": sst_lr[366:0] 
             },
-        verbose=1 
+        verbose=1
     )
 
     plt.plot(history.history['mse'][10:])
