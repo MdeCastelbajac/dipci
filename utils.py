@@ -6,9 +6,9 @@ from tensorflow import keras
 import tensorflow as tf
 from keras.models import Model
 from matplotlib import pyplot as plt
-from keras.preprocessing.image import array_to_img
 import math
 from scipy.signal import convolve2d
+from PIL import Image
 
 def normalize(image, min, max):
     factor = (max - min) / (np.amax(image) - np.amin(image))
@@ -77,7 +77,7 @@ def plot_line(Images,Titres,cmap,save_name,label="SSH(m)",shrink=0.3,center_colo
 
 
 def bicubicPredict( lr_data, data ):
-    length = lr.data.shape[0]
+    length = lr_data.shape[0]
     bicubic_upsampled_images = np.array(
             [bicubicInterpolation(img, data[0].shape[0]) for img in lr_data]
             )
@@ -88,16 +88,17 @@ def bicubicPredict( lr_data, data ):
 
 
 def bicubicMetrics( lr_data, data ):
-    length = lr.data.shape[0]
+    length = lr_data.shape[0]
     bicubic_predictions = bicubicPredict(lr_data, data)
     bicubic_psnr = np.array([ psnr(bicubic_predictions[i], data[i]) for i in range(length) ])
     bicubic_rmse = np.array([ rmse(bicubic_predictions[i], data[i]) for i in range(length) ])
-    return bicubic_predictions, bicubic_rmse, bicubic_rmse
+    return bicubic_predictions, bicubic_rmse, bicubic_psnr
 
 
 def srcnnPredict(model, lr_data, data):
-    srcnn_predictions = np.array( [model.predict(np.expand_dims(img, axis=0)) for img in lr_data] )
-    srcnn_predictions = np.array( [srcnn_predictions[i].reshape((data[0].shape[0], data[0].shape[1]))] )
+    length = lr_data.shape[0]
+    srcnn_predictions = np.array( [model.predict(np.expand_dims(img, axis=0), verbose=0) for img in lr_data] )
+    srcnn_predictions = np.array( [srcnn_predictions[i].reshape((data[0].shape[0], data[0].shape[1])) for i in range(length)] )
     srcnn_predictions = np.array([ normalize(srcnn_predictions[i], data[i].min() , data[i].max()) for i in range(length) ])
     return srcnn_predictions
 
