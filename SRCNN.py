@@ -13,23 +13,22 @@ from tensorflow.keras.preprocessing.image import img_to_array
 import matplotlib.pyplot as plt
 from utils import PSNR, bicubicInterpolation
 
+# SRCNN
+# 3 convolutional layers 
+# on top of bicubic pre-upsampling
 
 def getModel(upscale_factor=4, channels=1):
     conv_args = {
         "activation": "relu",
-        "kernel_initializer": "Orthogonal",
         "padding": "same",
     }
     inputs = keras.Input(shape=(None, None, channels))
-    x = layers.Conv2D(64, 5, **conv_args)(inputs)
+    x = layers.Conv2D(128, 9, **conv_args)(inputs)
     x = layers.Conv2D(64, 3, **conv_args)(x)
-    x = layers.Conv2D(32, 3, **conv_args)(x)
-    x = layers.Conv2D(channels * (upscale_factor ** 2), 3, **conv_args)(x)
-    outputs = tf.nn.depth_to_space(x, upscale_factor)
+    x = layers.Conv2D(1, 5, **conv_args)(x)
+    return keras.Model(inputs, x)
 
-    return keras.Model(inputs, outputs)
-
-def compileModel():
+def compileModel(epochs):
     early_stopping_callback = keras.callbacks.EarlyStopping(
             monitor="loss", patience=10
             )
@@ -44,18 +43,19 @@ def compileModel():
         save_best_only=True,
     )
 
-    callbacks = [early_stopping_callback, model_checkpoint_callback]
+    callbacks = [model_checkpoint_callback]
+        #early_stopping_callback, model_checkpoint_callback]
     srcnn = getModel()
     srcnn.summary()
     loss_fn = keras.losses.MeanSquaredError()
-    optimizer = keras.optimizers.Adam(learning_rate=0.001)
-    epochs = 100
+    optimizer = keras.optimizers.Adam(learning_rate=0.002)
     srcnn.compile(
         optimizer=optimizer, loss=loss_fn, metrics=['mse', PSNR]
     )   
     return srcnn, callbacks, epochs, checkpoint_filepath
 
-def trainModel( srcnn, batch_size, ssh_lr, ssh_norm, callbacks, epochs ):
+def trainModel( srcnn, batch_size, ssh_lr, ssh_norm, callbacks, epochs, exp):
+    
     train_ds = tf.data.Dataset.from_tensor_slices(
             (ssh_lr[0:366], ssh_norm[0:366])
             )
@@ -71,14 +71,13 @@ def trainModel( srcnn, batch_size, ssh_lr, ssh_norm, callbacks, epochs ):
         epochs=epochs,
         callbacks=callbacks,
         validation_data=validation_ds,
-        verbose=1
+        verbose=2
     )
 
     plt.plot(history.history['mse'][10:])
     plt.figure()
     plt.plot(history.history['PSNR'])
 
-    srcnn.save('tmp/model/srcnn')
+    srcnn.save('tmp/model/srcnn/'+str(exp))
 
     return srcnn
-

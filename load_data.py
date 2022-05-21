@@ -14,7 +14,7 @@ def loadDataR09( upscale_factor ):
             [downsample(img, upscale_factor) for img in ssh_norm]
             )
     sst_lr = np.array(
-            [downsample(img, upscale_factor//2) for img in sst_norm]
+            [downsample(img, upscale_factor) for img in sst_norm]
             )
     return ssh, sst, ssh_norm, sst_norm, ssh_lr, sst_lr
 
@@ -37,7 +37,7 @@ def loadDataR18( upscale_factor ):
             [downsample(img, upscale_factor) for img in ssh_norm]
             )
     sst_lr = np.array(
-            [downsample(img, upscale_factor//2) for img in sst_norm]
+            [downsample(img, upscale_factor) for img in sst_norm]
             )
     return ssh, sst, ssh_norm, sst_norm, ssh_lr, sst_lr
 
